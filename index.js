@@ -30,7 +30,7 @@ async function run() {
     const db = client.db("ticketGhor");
     const productsCollection = db.collection("products");
     const userCollection =  db.collection('user');
-    
+    const bookingCollection = db.collection('bookings');
     app.post('/products', async (req, res) => {
         try {
             const product = req.body;
@@ -175,6 +175,18 @@ async function run() {
     })
 
 
+    app.post('/bookings', async(req , res)=>{
+         const {ticketId , quantity , userEmail} = req?.body;
+         const Obj = {
+             ticketId,
+             quantity,
+             userEmail
+         }   
+         const result = await bookingCollection.insertOne(Obj);
+         res.send(result);
+    })
+    
+    
 
 
 
