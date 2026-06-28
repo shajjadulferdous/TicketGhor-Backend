@@ -165,10 +165,14 @@ async function run() {
     console.error(error);
     res.status(500).send({ message: "Internal server error" });
   }
-});
+    });
 
 
-
+    app.get('/tickets/:id',async(req , res)=>{
+          const {id} = req.params;
+          const result = await productsCollection.findOne({_id : new ObjectId(id)});
+          res.send(result);
+    })
 
 
 
