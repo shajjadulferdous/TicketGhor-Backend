@@ -30,6 +30,7 @@ async function run() {
     const db = client.db("ticketGhor");
     const productsCollection = db.collection("products");
     const userCollection =  db.collection('user');
+    
     app.post('/products', async (req, res) => {
         try {
             const product = req.body;
@@ -60,26 +61,76 @@ async function run() {
       res.send(result);
 
    })
-   app.patch('/api/tickets/:id/status', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const { status } = req.body; // Extract the status sent from the frontend
 
-    if (!status) {
-      return res.status(400).send({ message: "Status is required" });
+    app.patch('/api/tickets/:id/status', async (req, res) => {
+    try {
+        const id = req.params.id;
+        const { status } = req.body; // Extract the status sent from the frontend
+
+        if (!status) {
+        return res.status(400).send({ message: "Status is required" });
+        }
+
+        const result = await productsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: status } } // Correct $set syntax
+        );
+
+        res.status(200).send(result);
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal server error" });
     }
 
-    const result = await productsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { status: status } } // Correct $set syntax
+
+        
+
+
+
+
+    });
+    
+
+   
+    app.patch('/users/:email/role', async (req, res) => {
+  try {
+    const email = req.params.email;
+    const { role } = req.body;
+
+    if (!role) {
+      return res.status(400).send({ message: "Role state is required" });
+    }
+
+    // Update user role matching directly by email address
+    const result = await userCollection.updateOne(
+      { email: email }, 
+      { $set: { role: role } }
     );
 
-    res.status(200).send(result);
+    // Additional requirement logic: If vendor is marked as fraud, hide all their tickets
+    if (role === "fraud") {
+      await productsCollection.updateMany(
+        { vendorEmail: email },
+        { $set: { status: "rejected" } } // Or "rejected" depending on implementation
+      );
+    }
+
+    res.status(200).send({ success: true, result });
   } catch (error) {
     console.error(error);
     res.status(500).send({ message: "Internal server error" });
   }
 });
+
+
+
+
+
+
+
+
+
+
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
