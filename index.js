@@ -90,7 +90,52 @@ async function run() {
 
     });
     
+    app.get('/tickets', async (req, res) => {
+  try {
+    // 1. Extract query parameters sent from the frontend
+    const { from, to, transport, sort } = req.query;
 
+    // 2. Initialize an empty query object. 
+    // Best practice: Only show tickets that have been 'approved' by the admin.
+    let query = { status: 'approved' }; 
+
+    // 3. Dynamically build the search filters
+    if (from) {
+      // $regex allows for partial matches (e.g., "dha" matches "Dhaka")
+      // $options: 'i' makes it case-insensitive
+      query.from = { $regex: from, $options: 'i' }; 
+    }
+    
+    if (to) {
+      query.to = { $regex: to, $options: 'i' };
+    }
+    
+    if (transport && transport !== 'all') {
+      query.transport = transport.toLowerCase(); // Exact match for transport type
+    }
+
+    // 4. Determine sorting logic
+    let sortOptions = {}; // Default is no sorting (insertion order)
+    if (sort === 'price-asc') {
+      sortOptions.price = 1; // 1 means ascending (Low to High)
+    } else if (sort === 'price-desc') {
+      sortOptions.price = -1; // -1 means descending (High to Low)
+    }
+
+    // 5. Execute the query in MongoDB
+    const result = await productsCollection
+      .find(query)
+      .sort(sortOptions)
+      .toArray();
+
+    // 6. Send the filtered and sorted tickets back to the client
+    res.status(200).send(result);
+
+  } catch (error) {
+    console.error("Failed to fetch tickets:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+    });
    
     app.patch('/users/:email/role', async (req, res) => {
   try {
