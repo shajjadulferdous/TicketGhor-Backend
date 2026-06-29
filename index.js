@@ -259,139 +259,158 @@ async function run() {
 
 
 
-// ── 1. GET ALL REQUESTED BOOKINGS FOR A VENDOR ──
-app.get("/vendor/bookings/:email", async (req, res) => {
-  try {
-    const { email } = req.params;
+    // ── 1. GET ALL REQUESTED BOOKINGS FOR A VENDOR ──
+    app.get("/vendor/bookings/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
 
-    const result = await bookingCollection.aggregate([
-      {
-        // Lookup the ticket details first
-        $addFields: {
-          ticketObjectId: { $toObjectId: "$ticketId" },
-        },
-      },
-      {
-        $lookup: {
-          from: "products", // Matches your tickets collection
-          localField: "ticketObjectId",
-          foreignField: "_id",
-          as: "ticketInfo",
-        },
-      },
-      {
-        $unwind: "$ticketInfo",
-      },
-      {
-        // CRITICAL: Filter to only show bookings for THIS vendor's tickets
-        // Assumes your ticket document contains a 'vendorEmail' or 'userEmail' field for the creator
-        $match: {
-          "ticketInfo.vendorEmail": email
-        }
-      },
-      {
-        $project: {
-          _id: 1,
-          userEmail: 1, // Buyer's email
-          userName: { $ifNull: ["$userName", "Customer"] },
-          quantity: 1,
-          status: { $ifNull: ["$status", "pending"] },
-          totalPrice: {
-            $multiply: [
-              { $toInt: "$quantity" },
-              { $toInt: "$ticketInfo.price" }
-            ],
+        const result = await bookingCollection.aggregate([
+          {
+            // Lookup the ticket details first
+            $addFields: {
+              ticketObjectId: { $toObjectId: "$ticketId" },
+            },
           },
-          ticketTitle: "$ticketInfo.title"
-        },
-      },
-      {
-        // Sort newest requests first
-        $sort: { _id: -1 }
+          {
+            $lookup: {
+              from: "products", // Matches your tickets collection
+              localField: "ticketObjectId",
+              foreignField: "_id",
+              as: "ticketInfo",
+            },
+          },
+          {
+            $unwind: "$ticketInfo",
+          },
+          {
+            // CRITICAL: Filter to only show bookings for THIS vendor's tickets
+            // Assumes your ticket document contains a 'vendorEmail' or 'userEmail' field for the creator
+            $match: {
+              "ticketInfo.vendorEmail": email
+            }
+          },
+          {
+            $project: {
+              _id: 1,
+              userEmail: 1, // Buyer's email
+              userName: { $ifNull: ["$userName", "Customer"] },
+              quantity: 1,
+              status: { $ifNull: ["$status", "pending"] },
+              totalPrice: {
+                $multiply: [
+                  { $toInt: "$quantity" },
+                  { $toInt: "$ticketInfo.price" }
+                ],
+              },
+              ticketTitle: "$ticketInfo.title"
+            },
+          },
+          {
+            // Sort newest requests first
+            $sort: { _id: -1 }
+          }
+        ]).toArray();
+
+        res.send(result);
+      } catch (err) {
+        console.error("Vendor Bookings Fetch Error:", err);
+        res.status(500).send({ message: "Failed to fetch requested bookings", error: err.message });
       }
-    ]).toArray();
-
-    res.send(result);
-  } catch (err) {
-    console.error("Vendor Bookings Fetch Error:", err);
-    res.status(500).send({ message: "Failed to fetch requested bookings", error: err.message });
-  }
-});
-
-// ── 2. PATCH UPDATE BOOKING STATUS (ACCEPT / REJECT) ──
-app.patch("/bookings/:id/status", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body; // Expects "accepted" or "rejected"
-
-    if (!["accepted", "rejected"].includes(status?.toLowerCase())) {
-      return res.status(400).send({ message: "Invalid status state assignment" });
-    }
-
-    const filter = { _id: new ObjectId(id) };
-    const updateDoc = {
-      $set: { status: status.toLowerCase().trim() },
-    };
-
-    const result = await bookingCollection.updateOne(filter, updateDoc);
-
-    if (result.matchedCount === 0) {
-      return res.status(404).send({ message: "Booking record not found" });
-    }
-
-    res.send({ success: true, message: `Booking successfully ${status}` });
-  } catch (err) {
-    console.error("Status Update Error:", err);
-    res.status(500).send({ message: "Internal Server Error", error: err.message });
-  }
-});
-
-app.post('/api/orders', async (req, res) => {
-  try {
-    const {
-      transactionId,
-      amount,
-      title,
-      time,
-      ticketId,
-      quantity,
-      userEmail,
-      bookingId
-    } = req.body;
-
-    const result = await transactionCollection.insertOne({
-      transactionId,
-      amount,
-      title,
-      time,
-      userEmail
     });
 
-    const product = await productsCollection.findOne({
-      _id: new ObjectId(ticketId)
+    // ── 2. PATCH UPDATE BOOKING STATUS (ACCEPT / REJECT) ──
+    app.patch("/bookings/:id/status", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { status } = req.body; // Expects "accepted" or "rejected"
+
+        if (!["accepted", "rejected"].includes(status?.toLowerCase())) {
+          return res.status(400).send({ message: "Invalid status state assignment" });
+        }
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: { status: status.toLowerCase().trim() },
+        };
+
+        const result = await bookingCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ message: "Booking record not found" });
+        }
+
+        res.send({ success: true, message: `Booking successfully ${status}` });
+      } catch (err) {
+        console.error("Status Update Error:", err);
+        res.status(500).send({ message: "Internal Server Error", error: err.message });
+      }
     });
 
-    if (!product) {
-      return res.status(404).send({ error: "Ticket not found" });
-    }
+    app.post('/api/orders', async (req, res) => {
+      try {
+        const {
+          transactionId,
+          amount,
+          title,
+          time,
+          ticketId,
+          quantity,
+          userEmail,
+          bookingId
+        } = req.body;
 
-    if (product.quantity < Number(quantity)) {
-      return res.status(400).send({ error: "Not enough quantity" });
-    }
+        const existingTransaction = await transactionCollection.findOne({ transactionId });
 
-    const result2 = await productsCollection.updateOne(
-      { _id: new ObjectId(ticketId) },
-      { $set: { quantity: product.quantity - Number(quantity) } }
-    );
-    const result3 = await bookingCollection.updateOne({_id : new ObjectId(bookingId)} , {$set:{status:"paid"}});
-    res.send({ result, result2 , result3});
+        if (existingTransaction) {
+          return res.send({
+            message: "Transaction already exists",
+            data: existingTransaction
+          });
+        }
 
-  } catch (error) {
-    console.log(error);
-    res.status(500).send({ error: error.message });
-  }
-});
+        const result = await transactionCollection.insertOne({
+          transactionId,
+          amount,
+          title,
+          time,
+          userEmail
+        });
 
+        const product = await productsCollection.findOne({
+          _id: new ObjectId(ticketId)
+        });
+
+        if (!product) {
+          return res.status(404).send({ error: "Ticket not found" });
+        }
+
+        if (product.quantity < Number(quantity)) {
+          return res.status(400).send({ error: "Not enough quantity" });
+        }
+
+        const result2 = await productsCollection.updateOne(
+          { _id: new ObjectId(ticketId) },
+          { $set: { quantity: product.quantity - Number(quantity) } }
+        );
+
+        const result3 = await bookingCollection.updateOne(
+          { _id: new ObjectId(bookingId) },
+          { $set: { status: "paid" } }
+        );
+
+        res.send({ result, result2, result3 });
+
+      } catch (error) {
+        console.log(error);
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    app.get('/transaction/:email' , async(req , res)=>{
+          const email = req.params.email;
+          const result = await transactionCollection.find({userEmail:email}).toArray();
+          res.send(result);
+    })
 
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
