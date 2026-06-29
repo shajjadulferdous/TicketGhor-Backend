@@ -31,6 +31,7 @@ async function run() {
     const productsCollection = db.collection("products");
     const userCollection =  db.collection('user');
     const bookingCollection = db.collection('bookings');
+    const transactionCollection = db.collection('transactions');
     app.post('/products', async (req, res) => {
         try {
             const product = req.body;
@@ -345,7 +346,51 @@ app.patch("/bookings/:id/status", async (req, res) => {
   }
 });
 
+app.post('/api/orders', async (req, res) => {
+  try {
+    const {
+      transactionId,
+      amount,
+      title,
+      time,
+      ticketId,
+      quantity,
+      userEmail,
+      bookingId
+    } = req.body;
 
+    const result = await transactionCollection.insertOne({
+      transactionId,
+      amount,
+      title,
+      time,
+      userEmail
+    });
+
+    const product = await productsCollection.findOne({
+      _id: new ObjectId(ticketId)
+    });
+
+    if (!product) {
+      return res.status(404).send({ error: "Ticket not found" });
+    }
+
+    if (product.quantity < Number(quantity)) {
+      return res.status(400).send({ error: "Not enough quantity" });
+    }
+
+    const result2 = await productsCollection.updateOne(
+      { _id: new ObjectId(ticketId) },
+      { $set: { quantity: product.quantity - Number(quantity) } }
+    );
+    const result3 = await bookingCollection.updateOne({_id : new ObjectId(bookingId)} , {$set:{status:"paid"}});
+    res.send({ result, result2 , result3});
+
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({ error: error.message });
+  }
+});
 
 
     await client.db("admin").command({ ping: 1 });
