@@ -258,6 +258,95 @@ async function run() {
 
 
 
+// ── 1. GET ALL REQUESTED BOOKINGS FOR A VENDOR ──
+app.get("/vendor/bookings/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const result = await bookingCollection.aggregate([
+      {
+        // Lookup the ticket details first
+        $addFields: {
+          ticketObjectId: { $toObjectId: "$ticketId" },
+        },
+      },
+      {
+        $lookup: {
+          from: "products", // Matches your tickets collection
+          localField: "ticketObjectId",
+          foreignField: "_id",
+          as: "ticketInfo",
+        },
+      },
+      {
+        $unwind: "$ticketInfo",
+      },
+      {
+        // CRITICAL: Filter to only show bookings for THIS vendor's tickets
+        // Assumes your ticket document contains a 'vendorEmail' or 'userEmail' field for the creator
+        $match: {
+          "ticketInfo.vendorEmail": email
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          userEmail: 1, // Buyer's email
+          userName: { $ifNull: ["$userName", "Customer"] },
+          quantity: 1,
+          status: { $ifNull: ["$status", "pending"] },
+          totalPrice: {
+            $multiply: [
+              { $toInt: "$quantity" },
+              { $toInt: "$ticketInfo.price" }
+            ],
+          },
+          ticketTitle: "$ticketInfo.title"
+        },
+      },
+      {
+        // Sort newest requests first
+        $sort: { _id: -1 }
+      }
+    ]).toArray();
+
+    res.send(result);
+  } catch (err) {
+    console.error("Vendor Bookings Fetch Error:", err);
+    res.status(500).send({ message: "Failed to fetch requested bookings", error: err.message });
+  }
+});
+
+// ── 2. PATCH UPDATE BOOKING STATUS (ACCEPT / REJECT) ──
+app.patch("/bookings/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // Expects "accepted" or "rejected"
+
+    if (!["accepted", "rejected"].includes(status?.toLowerCase())) {
+      return res.status(400).send({ message: "Invalid status state assignment" });
+    }
+
+    const filter = { _id: new ObjectId(id) };
+    const updateDoc = {
+      $set: { status: status.toLowerCase().trim() },
+    };
+
+    const result = await bookingCollection.updateOne(filter, updateDoc);
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ message: "Booking record not found" });
+    }
+
+    res.send({ success: true, message: `Booking successfully ${status}` });
+  } catch (err) {
+    console.error("Status Update Error:", err);
+    res.status(500).send({ message: "Internal Server Error", error: err.message });
+  }
+});
+
+
+
 
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
