@@ -422,7 +422,7 @@ async function run() {
             $set: { isAdvertised: isAdvertised }
         };
         
-        await ticketCollection.updateOne(filter, updateDoc);
+        await productsCollection.updateOne(filter, updateDoc);
         res.send({ success: true });
     } catch (error) {
         res.status(500).send({ error: "Failed to update advertisement status" });
