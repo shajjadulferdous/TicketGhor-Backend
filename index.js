@@ -411,6 +411,28 @@ async function run() {
           const result = await transactionCollection.find({userEmail:email}).toArray();
           res.send(result);
     })
+    
+    app.patch("/tickets/:id/advertise", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { isAdvertised } = req.body; // true or false
+        
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+            $set: { isAdvertised: isAdvertised }
+        };
+        
+        await ticketCollection.updateOne(filter, updateDoc);
+        res.send({ success: true });
+    } catch (error) {
+        res.status(500).send({ error: "Failed to update advertisement status" });
+    }
+    
+    });
+
+
+
+
 
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
