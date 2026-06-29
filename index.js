@@ -180,13 +180,80 @@ async function run() {
          const Obj = {
              ticketId,
              quantity,
-             userEmail
+             userEmail,
+             status:"pending"
          }   
          const result = await bookingCollection.insertOne(Obj);
          res.send(result);
     })
     
-    
+
+    app.get("/user/bookings/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const result = await bookingCollection.aggregate([
+      {
+        $match: {
+          userEmail: email,
+        },
+      },
+      {
+        $addFields: {
+          ticketObjectId: {
+            $toObjectId: "$ticketId",
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: "products", 
+          localField: "ticketObjectId",
+          foreignField: "_id",
+          as: "ticketInfo",
+        },
+      },
+      {
+        $unwind: {
+          path: "$ticketInfo",
+          preserveNullAndEmptyArrays: true // Prevents crashes if a ticket was deleted
+        }
+      },
+      {
+        $project: {
+          _id: 1, 
+          quantity: 1,
+          
+          // ── MAGIC FIX: If status doesn't exist in DB, default to "pending" ──
+          status: { $ifNull: ["$status", "pending"] }, 
+          
+          totalPrice: {
+            $multiply: [
+              { $toInt: "$quantity" },
+              { $toInt: "$ticketInfo.price" }
+            ],
+          },
+          
+          ticketId: {
+            _id: "$ticketInfo._id",
+            title: "$ticketInfo.title",
+            from: "$ticketInfo.from",
+            to: "$ticketInfo.to",
+            departure: "$ticketInfo.departure",
+            transport: "$ticketInfo.transport",
+            imageUrl: "$ticketInfo.imageUrl",
+            price: "$ticketInfo.price",
+          },
+        },
+      },
+    ]).toArray();
+
+    res.send(result);
+  } catch (err) {
+    console.error("Aggregation Error:", err);
+    res.status(500).send({ message: "Failed to fetch bookings", error: err.message });
+  }
+});
 
 
 
