@@ -13,6 +13,7 @@ app.get('/', (req, res) => {
 
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 const uri = process.env.MONGODB_URI;
 
 
@@ -24,14 +25,57 @@ const client = new MongoClient(uri, {
   }
 });
 
+
+async function validateToken(token) {
+  try {
+    const JWKS = createRemoteJWKSet(
+      new URL(`${process.env.BETTER_AUTH_URL}/api/auth/jwks`)
+    );
+
+    const { payload } = await jwtVerify(token, JWKS);
+    return payload;
+  } catch (error) {
+    console.error("Token validation failed:", error);
+    throw error;
+  }
+}
+
+const verifyJwtToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+      return res.status(401).send({ message: "No token provided" });
+    }
+
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).send({ message: "Invalid token format" });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    const payload = await validateToken(token);
+
+    req.user = payload; 
+    next();
+  } catch (error) {
+    return res.status(401).send({
+      message: "Unauthorized",
+      error: error.message
+    });
+  }
+};
+
+
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("ticketGhor");
     const productsCollection = db.collection("products");
     const userCollection =  db.collection('user');
     const bookingCollection = db.collection('bookings');
     const transactionCollection = db.collection('transactions');
+
     app.post('/products', async (req, res) => {
         try {
             const product = req.body;
@@ -44,26 +88,26 @@ async function run() {
         }
     });
  
-   app.get('/my-products/:email' , async(req , res) =>{
+   app.get('/my-products/:email' , verifyJwtToken, async(req , res) =>{
         const {email} = req.params;
         console.log(email);
         const result = await productsCollection.find({vendorEmail:email}).toArray();
         res.send(result);
    })
 
-   app.get('/pending-tickets' , async(req , res)=>{
+   app.get('/pending-tickets' ,verifyJwtToken, async(req , res)=>{
        const result = await productsCollection.find().toArray();
        res.send(result);
    })
 
-   app.get('/users',async(req , res)=>{
+   app.get('/users', verifyJwtToken,async(req , res)=>{
         
       const result =await userCollection.find().toArray();
       res.send(result);
 
    })
 
-    app.patch('/api/tickets/:id/status', async (req, res) => {
+    app.patch('/api/tickets/:id/status',verifyJwtToken, async (req, res) => {
     try {
         const id = req.params.id;
         const { status } = req.body; // Extract the status sent from the frontend
@@ -91,7 +135,7 @@ async function run() {
 
     });
     
-    app.get('/tickets', async (req, res) => {
+    app.get('/tickets' ,async (req, res) => {
   try {
     // 1. Extract query parameters sent from the frontend
     const { from, to, transport, sort } = req.query;
@@ -138,7 +182,7 @@ async function run() {
   }
     });
    
-    app.patch('/users/:email/role', async (req, res) => {
+    app.patch('/users/:email/role',  verifyJwtToken ,async (req, res) => {
   try {
     const email = req.params.email;
     const { role } = req.body;
@@ -169,14 +213,14 @@ async function run() {
     });
 
 
-    app.get('/tickets/:id',async(req , res)=>{
+    app.get('/tickets/:id',verifyJwtToken , async(req , res)=>{
           const {id} = req.params;
           const result = await productsCollection.findOne({_id : new ObjectId(id)});
           res.send(result);
     })
 
 
-    app.post('/bookings', async(req , res)=>{
+    app.post('/bookings', verifyJwtToken, async(req , res)=>{
          const {ticketId , quantity , userEmail} = req?.body;
          const Obj = {
              ticketId,
@@ -188,7 +232,7 @@ async function run() {
          res.send(result);
     })
     
-    app.get("/user/bookings/:email", async (req, res) => {
+    app.get("/user/bookings/:email", verifyJwtToken, async (req, res) => {
   try {
     const { email } = req.params;
 
@@ -256,7 +300,7 @@ async function run() {
     });
 
 
-    app.get("/vendor/bookings/:email", async (req, res) => {
+    app.get("/vendor/bookings/:email", verifyJwtToken ,async (req, res) => {
       try {
         const { email } = req.params;
 
@@ -314,7 +358,7 @@ async function run() {
       }
     });
 
-    app.patch("/bookings/:id/status", async (req, res) => {
+    app.patch("/bookings/:id/status", verifyJwtToken, async (req, res) => {
       try {
         const { id } = req.params;
         const { status } = req.body; // Expects "accepted" or "rejected"
@@ -341,7 +385,7 @@ async function run() {
       }
     });
 
-    app.post('/api/orders', async (req, res) => {
+    app.post('/api/orders', verifyJwtToken, async (req, res) => {
       try {
         const {
           transactionId,
@@ -401,13 +445,13 @@ async function run() {
       }
     });
 
-    app.get('/transaction/:email' , async(req , res)=>{
+    app.get('/transaction/:email',verifyJwtToken , async(req , res)=>{
           const email = req.params.email;
           const result = await transactionCollection.find({userEmail:email}).toArray();
           res.send(result);
     })
     
-    app.patch("/tickets/:id/advertise", async (req, res) => {
+    app.patch("/tickets/:id/advertise", verifyJwtToken, async (req, res) => {
     try {
         const { id } = req.params;
         const { isAdvertised } = req.body; // true or false
@@ -425,123 +469,142 @@ async function run() {
     
     });
     
-// ── GET REVENUE AND VOLUME OVERVIEW ──
-app.get("/admin/revenue-overview", async (req, res) => {
-  try {
-    // 1. Calculate Total Tickets Added (Lifetime)
-    const totalTicketsAdded = await productsCollection.countDocuments({});
+    app.get("/admin/revenue-overview", verifyJwtToken, async (req, res) => {
+      try {
+        // 1. Calculate Total Tickets Added (Lifetime)
+        const totalTicketsAdded = await productsCollection.countDocuments({});
 
-    // 2. Calculate Total Tickets Sold (Lifetime)
-    // Sums "quantity" from documents where status is "paid"
-    const soldStats = await bookingCollection.aggregate([
-      { $match: { status: "paid", quantity: { $exists: true } } },
-      { $group: { _id: null, totalSold: { $sum: "$quantity" } } }
-    ]).toArray();
-    const totalTicketsSold = soldStats[0]?.totalSold || 0;
+        // 2. Calculate Total Tickets Sold (Lifetime)
+        // Sums "quantity" from documents where status is "paid"
+        const soldStats = await bookingCollection.aggregate([
+          { $match: { status: "paid", quantity: { $exists: true } } },
+          { $group: { _id: null, totalSold: { $sum: "$quantity" } } }
+        ]).toArray();
+        const totalTicketsSold = soldStats[0]?.totalSold || 0;
 
-    // 3. Calculate Total Gross Revenue (Lifetime)
-    // Sums "amount" from your payment log documents
-    const revenueStats = await bookingCollection.aggregate([
-      { $match: { amount: { $exists: true } } },
-      { $group: { _id: null, totalRev: { $sum: "$amount" } } }
-    ]).toArray();
-    const totalRevenue = revenueStats[0]?.totalRev || 0;
+        // 3. Calculate Total Gross Revenue (Lifetime)
+        // Sums "amount" from your payment log documents
+        const revenueStats = await bookingCollection.aggregate([
+          { $match: { amount: { $exists: true } } },
+          { $group: { _id: null, totalRev: { $sum: "$amount" } } }
+        ]).toArray();
+        const totalRevenue = revenueStats[0]?.totalRev || 0;
 
-    // ── CHART DATA TIMELINE AGGREGATIONS (Grouped by "Month Year") ──
+        // ── CHART DATA TIMELINE AGGREGATIONS (Grouped by "Month Year") ──
 
-    // A. Monthly Tickets Added (using 'createdAt' from productCollection)
-    const addedByMonth = await productsCollection.aggregate([
-      { $match: { createdAt: { $exists: true } } },
-      {
-        $group: {
-          _id: { $dateToString: { format: "%b %Y", date: { $dateFromString: { dateString: "$createdAt" } } } },
-          added: { $sum: 1 }
+        // A. Monthly Tickets Added (using 'createdAt' from productCollection)
+        const addedByMonth = await productsCollection.aggregate([
+          { $match: { createdAt: { $exists: true } } },
+          {
+            $group: {
+              _id: { $dateToString: { format: "%b %Y", date: { $dateFromString: { dateString: "$createdAt" } } } },
+              added: { $sum: 1 }
+            }
+          }
+        ]).toArray();
+
+        // B. Monthly Revenue generated (using 'time' from payment logs inside bookingCollection)
+        const revenueByMonth = await bookingCollection.aggregate([
+          { $match: { amount: { $exists: true }, time: { $exists: true } } },
+          {
+            $group: {
+              _id: { $dateToString: { format: "%b %Y", date: { $dateFromString: { dateString: "$time" } } } },
+              revenue: { $sum: "$amount" }
+            }
+          }
+        ]).toArray();
+
+        // C. Monthly Tickets Sold 
+        // (Checks for 'time' or 'createdAt' fallback within paid booking records)
+        const soldByMonth = await bookingCollection.aggregate([
+          { $match: { status: "paid", quantity: { $exists: true } } },
+          {
+            $group: {
+              _id: { 
+                $dateToString: { 
+                  format: "%b %Y", 
+                  date: { $dateFromString: { dateString: { $ifNull: ["$time", "$createdAt", "2026-06-30T00:00:00.000Z"] } } } 
+                } 
+              },
+              sold: { $sum: "$quantity" }
+            }
+          }
+        ]).toArray();
+
+        // 4. Merge Chart Collections Systematically into a unified Recharts Map
+        const chartMap = {};
+
+        // Process tickets added lines
+        addedByMonth.forEach(item => {
+          if (item._id) {
+            chartMap[item._id] = { name: item._id, Revenue: 0, Sold: 0, Added: item.added };
+          }
+        });
+
+        // Process revenue lines
+        revenueByMonth.forEach(item => {
+          if (item._id) {
+            if (!chartMap[item._id]) chartMap[item._id] = { name: item._id, Revenue: 0, Sold: 0, Added: 0 };
+            chartMap[item._id].Revenue = item.revenue;
+          }
+        });
+
+        // Process items sold lines
+        soldByMonth.forEach(item => {
+          if (item._id) {
+            if (!chartMap[item._id]) chartMap[item._id] = { name: item._id, Revenue: 0, Sold: 0, Added: 0 };
+            chartMap[item._id].Sold = item.sold;
+          }
+        });
+
+        // Convert map back to sequence array
+        let chartData = Object.values(chartMap);
+
+        // Dynamic clean fallback template if empty database collection initialization state is hit
+        if (chartData.length === 0) {
+          chartData = [
+            { name: 'Jun 2026', Revenue: totalRevenue, Sold: totalTicketsSold, Added: totalTicketsAdded }
+          ];
         }
-      }
-    ]).toArray();
 
-    // B. Monthly Revenue generated (using 'time' from payment logs inside bookingCollection)
-    const revenueByMonth = await bookingCollection.aggregate([
-      { $match: { amount: { $exists: true }, time: { $exists: true } } },
-      {
-        $group: {
-          _id: { $dateToString: { format: "%b %Y", date: { $dateFromString: { dateString: "$time" } } } },
-          revenue: { $sum: "$amount" }
-        }
-      }
-    ]).toArray();
+        // 5. Dispatch Payload
+        res.send({
+          totalTicketsAdded,
+          totalTicketsSold,
+          totalRevenue,
+          chartData
+        });
 
-    // C. Monthly Tickets Sold 
-    // (Checks for 'time' or 'createdAt' fallback within paid booking records)
-    const soldByMonth = await bookingCollection.aggregate([
-      { $match: { status: "paid", quantity: { $exists: true } } },
-      {
-        $group: {
-          _id: { 
-            $dateToString: { 
-              format: "%b %Y", 
-              date: { $dateFromString: { dateString: { $ifNull: ["$time", "$createdAt", "2026-06-30T00:00:00.000Z"] } } } 
-            } 
-          },
-          sold: { $sum: "$quantity" }
-        }
-      }
-    ]).toArray();
-
-    // 4. Merge Chart Collections Systematically into a unified Recharts Map
-    const chartMap = {};
-
-    // Process tickets added lines
-    addedByMonth.forEach(item => {
-      if (item._id) {
-        chartMap[item._id] = { name: item._id, Revenue: 0, Sold: 0, Added: item.added };
+      } catch (err) {
+        console.error("Critical Revenue Aggregation Failure:", err);
+        res.status(500).send({ 
+          error: "Internal Server Analytics Error", 
+          message: err.message 
+        });
       }
     });
 
-    // Process revenue lines
-    revenueByMonth.forEach(item => {
-      if (item._id) {
-        if (!chartMap[item._id]) chartMap[item._id] = { name: item._id, Revenue: 0, Sold: 0, Added: 0 };
-        chartMap[item._id].Revenue = item.revenue;
-      }
-    });
-
-    // Process items sold lines
-    soldByMonth.forEach(item => {
-      if (item._id) {
-        if (!chartMap[item._id]) chartMap[item._id] = { name: item._id, Revenue: 0, Sold: 0, Added: 0 };
-        chartMap[item._id].Sold = item.sold;
-      }
-    });
-
-    // Convert map back to sequence array
-    let chartData = Object.values(chartMap);
-
-    // Dynamic clean fallback template if empty database collection initialization state is hit
-    if (chartData.length === 0) {
-      chartData = [
-        { name: 'Jun 2026', Revenue: totalRevenue, Sold: totalTicketsSold, Added: totalTicketsAdded }
-      ];
+    app.patch('/user/update-profile', verifyJwtToken, async (req, res) => {
+    try {
+        const { email, name, image } = req.body;
+        console.log(req.body)
+        const result = await userCollection.updateOne(
+            { email },
+            {
+                $set: {
+                    name,
+                    image
+                }
+            }
+        );
+        console.log(result);
+        res.send(result);
+    } catch (error) {
+        res.status(500).send({ error: error.message });
     }
-
-    // 5. Dispatch Payload
-    res.send({
-      totalTicketsAdded,
-      totalTicketsSold,
-      totalRevenue,
-      chartData
     });
 
-  } catch (err) {
-    console.error("Critical Revenue Aggregation Failure:", err);
-    res.status(500).send({ 
-      error: "Internal Server Analytics Error", 
-      message: err.message 
-    });
-  }
-});
-
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
      
