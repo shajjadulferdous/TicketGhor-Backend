@@ -42,7 +42,7 @@ async function run() {
             console.error(error);
             res.status(500).send({ message: "Failed to add product" });
         }
-   });
+    });
  
    app.get('/my-products/:email' , async(req , res) =>{
         const {email} = req.params;
@@ -188,7 +188,6 @@ async function run() {
          res.send(result);
     })
     
-
     app.get("/user/bookings/:email", async (req, res) => {
   try {
     const { email } = req.params;
@@ -254,12 +253,9 @@ async function run() {
     console.error("Aggregation Error:", err);
     res.status(500).send({ message: "Failed to fetch bookings", error: err.message });
   }
-});
+    });
 
 
-
-
-    // ── 1. GET ALL REQUESTED BOOKINGS FOR A VENDOR ──
     app.get("/vendor/bookings/:email", async (req, res) => {
       try {
         const { email } = req.params;
@@ -318,7 +314,6 @@ async function run() {
       }
     });
 
-    // ── 2. PATCH UPDATE BOOKING STATUS (ACCEPT / REJECT) ──
     app.patch("/bookings/:id/status", async (req, res) => {
       try {
         const { id } = req.params;
@@ -429,9 +424,7 @@ async function run() {
     }
     
     });
-
-
-
+    
 
 
     await client.db("admin").command({ ping: 1 });
