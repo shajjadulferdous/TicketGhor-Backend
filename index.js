@@ -425,7 +425,121 @@ async function run() {
     
     });
     
+// ── GET REVENUE AND VOLUME OVERVIEW ──
+app.get("/admin/revenue-overview", async (req, res) => {
+  try {
+    // 1. Calculate Total Tickets Added (Lifetime)
+    const totalTicketsAdded = await productsCollection.countDocuments({});
 
+    // 2. Calculate Total Tickets Sold (Lifetime)
+    // Sums "quantity" from documents where status is "paid"
+    const soldStats = await bookingCollection.aggregate([
+      { $match: { status: "paid", quantity: { $exists: true } } },
+      { $group: { _id: null, totalSold: { $sum: "$quantity" } } }
+    ]).toArray();
+    const totalTicketsSold = soldStats[0]?.totalSold || 0;
+
+    // 3. Calculate Total Gross Revenue (Lifetime)
+    // Sums "amount" from your payment log documents
+    const revenueStats = await bookingCollection.aggregate([
+      { $match: { amount: { $exists: true } } },
+      { $group: { _id: null, totalRev: { $sum: "$amount" } } }
+    ]).toArray();
+    const totalRevenue = revenueStats[0]?.totalRev || 0;
+
+    // ── CHART DATA TIMELINE AGGREGATIONS (Grouped by "Month Year") ──
+
+    // A. Monthly Tickets Added (using 'createdAt' from productCollection)
+    const addedByMonth = await productsCollection.aggregate([
+      { $match: { createdAt: { $exists: true } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%b %Y", date: { $dateFromString: { dateString: "$createdAt" } } } },
+          added: { $sum: 1 }
+        }
+      }
+    ]).toArray();
+
+    // B. Monthly Revenue generated (using 'time' from payment logs inside bookingCollection)
+    const revenueByMonth = await bookingCollection.aggregate([
+      { $match: { amount: { $exists: true }, time: { $exists: true } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%b %Y", date: { $dateFromString: { dateString: "$time" } } } },
+          revenue: { $sum: "$amount" }
+        }
+      }
+    ]).toArray();
+
+    // C. Monthly Tickets Sold 
+    // (Checks for 'time' or 'createdAt' fallback within paid booking records)
+    const soldByMonth = await bookingCollection.aggregate([
+      { $match: { status: "paid", quantity: { $exists: true } } },
+      {
+        $group: {
+          _id: { 
+            $dateToString: { 
+              format: "%b %Y", 
+              date: { $dateFromString: { dateString: { $ifNull: ["$time", "$createdAt", "2026-06-30T00:00:00.000Z"] } } } 
+            } 
+          },
+          sold: { $sum: "$quantity" }
+        }
+      }
+    ]).toArray();
+
+    // 4. Merge Chart Collections Systematically into a unified Recharts Map
+    const chartMap = {};
+
+    // Process tickets added lines
+    addedByMonth.forEach(item => {
+      if (item._id) {
+        chartMap[item._id] = { name: item._id, Revenue: 0, Sold: 0, Added: item.added };
+      }
+    });
+
+    // Process revenue lines
+    revenueByMonth.forEach(item => {
+      if (item._id) {
+        if (!chartMap[item._id]) chartMap[item._id] = { name: item._id, Revenue: 0, Sold: 0, Added: 0 };
+        chartMap[item._id].Revenue = item.revenue;
+      }
+    });
+
+    // Process items sold lines
+    soldByMonth.forEach(item => {
+      if (item._id) {
+        if (!chartMap[item._id]) chartMap[item._id] = { name: item._id, Revenue: 0, Sold: 0, Added: 0 };
+        chartMap[item._id].Sold = item.sold;
+      }
+    });
+
+    // Convert map back to sequence array
+    let chartData = Object.values(chartMap);
+
+    // Dynamic clean fallback template if empty database collection initialization state is hit
+    if (chartData.length === 0) {
+      chartData = [
+        { name: 'Jun 2026', Revenue: totalRevenue, Sold: totalTicketsSold, Added: totalTicketsAdded }
+      ];
+    }
+
+    // 5. Dispatch Payload
+    res.send({
+      totalTicketsAdded,
+      totalTicketsSold,
+      totalRevenue,
+      chartData
+    });
+
+  } catch (err) {
+    console.error("Critical Revenue Aggregation Failure:", err);
+    res.status(500).send({ 
+      error: "Internal Server Analytics Error", 
+      message: err.message 
+    });
+  }
+});
 
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
