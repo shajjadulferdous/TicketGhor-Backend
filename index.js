@@ -107,11 +107,11 @@ async function run() {
 
    })
 
-    app.patch('/api/tickets/:id/status',verifyJwtToken, async (req, res) => {
+    app.patch('/tickets/:id/status',verifyJwtToken, async (req, res) => {
     try {
         const id = req.params.id;
         const { status } = req.body; // Extract the status sent from the frontend
-
+        console.log(id , "status" ,status);
         if (!status) {
         return res.status(400).send({ message: "Status is required" });
         }
@@ -120,7 +120,7 @@ async function run() {
         { _id: new ObjectId(id) },
         { $set: { status: status } } // Correct $set syntax
         );
-
+        console.log(result);
         res.status(200).send(result);
     } catch (error) {
         console.error(error);
